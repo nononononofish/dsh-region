@@ -7,6 +7,7 @@
  *  - auto 模式下定时探测主源健康：主源超时/失败自动切到备用源，主源恢复自动切回
  *  - 手动选择（/region use main|backup）持久化到 ~/.dsh/region.json，重启沿用
  *  - 提供 /region 命令与 'region' 服务（供 P1 Web UI 通过 RPC 调用）
+ *  - 提供 HTTP 路由（/dsh-region/status|use|menu）供 Web UI client 调用
  *
  * 零运行时依赖：仅使用 Node 内置模块与全局 fetch。
  */

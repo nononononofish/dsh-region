@@ -7,6 +7,7 @@
  *  - auto 模式下定时探测主源健康：主源超时/失败自动切到备用源，主源恢复自动切回
  *  - 手动选择（/region use main|backup）持久化到 ~/.dsh/region.json，重启沿用
  *  - 提供 /region 命令与 'region' 服务（供 P1 Web UI 通过 RPC 调用）
+ *  - 提供 HTTP 路由（/dsh-region/status|use|menu）供 Web UI client 调用
  *
  * 零运行时依赖：仅使用 Node 内置模块与全局 fetch。
  */
@@ -14,6 +15,7 @@
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { registerRegionRoutes } from './http.js'
 
 export const name = 'dsh-region'
 
@@ -57,6 +59,8 @@ interface RegionState {
   lastProbeAt: string | null
   lastSwitchAt: string | null
   lastError: string | null
+  /** 右上角 Web UI 菜单是否显示 */
+  menuVisible: boolean
   log: RegionLogEntry[]
 }
 
@@ -83,6 +87,7 @@ function defaultState(): RegionState {
     lastProbeAt: null,
     lastSwitchAt: null,
     lastError: null,
+    menuVisible: true,
     log: [],
   }
 }
@@ -166,6 +171,10 @@ class RegionService {
   private state: RegionState
   private timer: number | null = null
   private probing = false
+  private lastProbe: {
+    main: { ok: boolean; ms: number; error?: string }
+    backup: { ok: boolean; ms: number; error?: string }
+  } | null = null
 
   constructor(private readonly config: RegionConfig) {
     if (existsSync(statePath())) {
@@ -191,6 +200,7 @@ class RegionService {
     lastProbeAt: string | null
     lastSwitchAt: string | null
     lastError: string | null
+    menuVisible: boolean
     recentLog: RegionLogEntry[]
   } {
     return {
@@ -201,6 +211,7 @@ class RegionService {
       lastProbeAt: this.state.lastProbeAt,
       lastSwitchAt: this.state.lastSwitchAt,
       lastError: this.state.lastError,
+      menuVisible: this.state.menuVisible,
       recentLog: this.state.log.slice(-10),
     }
   }
@@ -217,6 +228,13 @@ class RegionService {
     return { ok: true, message: `已切换为 ${mode} 模式` }
   }
 
+  /** 设置右上角 Web UI 菜单显隐（持久化到 region.json） */
+  setMenuVisible(visible: boolean): void {
+    this.state.menuVisible = visible
+    this.log(visible ? 'Web UI 菜单已显示' : 'Web UI 菜单已隐藏')
+    writeState(this.state)
+  }
+
   /** 仅探测两源健康并报告，不改变当前应用状态 */
   async probe(): Promise<{
     main: { ok: boolean; ms: number; error?: string }
@@ -228,7 +246,13 @@ class RegionService {
     ])
     this.state.lastProbeAt = new Date().toISOString()
     writeState(this.state)
+    this.lastProbe = { main, backup }
     return { main, backup }
+  }
+
+  /** 最近一次探测结果（内存缓存，无则 null）。status 路由用，避免每次请求都实时探测。 */
+  getLastProbe(): { main: { ok: boolean; ms: number; error?: string }; backup: { ok: boolean; ms: number; error?: string } } | null {
+    return this.lastProbe
   }
 
   /**
@@ -389,6 +413,7 @@ export function apply(rawContext: unknown, config: Partial<RegionConfig> = {}): 
   const ctx = rawContext as {
     provide: (name: string, value: unknown) => unknown
     effect: (fn: () => unknown, label: string) => unknown
+    inject: (deps: string[], cb: (ctx: Record<string, unknown>) => void) => unknown
     commands?: { register: (command: unknown) => unknown }
   }
   const resolved: RegionConfig = { ...DEFAULT_CONFIG, ...config }
@@ -404,6 +429,24 @@ export function apply(rawContext: unknown, config: Partial<RegionConfig> = {}): 
   )
 
   if (ctx.commands) registerCommand(ctx.commands, service)
+
+  // HTTP 路由（供 Web UI client 调用）。webServer 缺失时静默跳过，不拖垮启动。
+  if (typeof ctx.inject === 'function') {
+    ctx.inject(['webServer'], (hostCtx) => {
+      const webServer = hostCtx['webServer'] as
+        | { register: (route: unknown) => () => void }
+        | undefined
+      const hostEffect = hostCtx['effect'] as ((fn: () => unknown, label: string) => unknown) | undefined
+      if (!webServer) return
+      hostEffect?.(
+        () => {
+          const disposers = registerRegionRoutes(webServer as never, service)
+          return () => disposers.forEach((dispose) => dispose())
+        },
+        'dsh-region.http-routes',
+      )
+    })
+  }
 }
 // 注意：只提供具名导出，勿加 export default。
 // dsh loader 的 unwrapExports 会优先取 exports.default 作为插件对象，
