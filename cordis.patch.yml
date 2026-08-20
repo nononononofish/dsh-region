@@ -1,0 +1,12 @@
+# Mount the region (download-source) manager into a DSH profile.
+# 手动选择（/region use）会持久化到 ~/.dsh/region.json 并优先于这里的默认值。
+- insert:
+    - id: region
+      name: dsh-region
+      config:
+        mode: auto
+        mainRegistry: https://registry.npmmirror.com
+        backupRegistry: https://registry.npmjs.org
+        probePackage: dsh-mnemon
+        timeoutMs: 10000
+        probeIntervalMs: 300000

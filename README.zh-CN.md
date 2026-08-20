@@ -1,0 +1,71 @@
+# dsh-region
+
+> 为 [DeepSeek Harness](https://github.com/deepseek-ai/dsh)（DSH）开发的下载源主备切换插件：**国内镜像为主、官方源为备、故障自动切换。**
+
+`dsh-region` 负责管理 DSH 配置档（profile）的包下载源。它把国内 npm 镜像（[npmmirror](https://npmmirror.com)）设为主源、官方 npm 源设为备用源——国内安装插件保持飞快，镜像挂了也不会卡死。
+
+> **第三方社区插件，与 DeepSeek 官方无关。**
+
+## 功能特性
+
+- **自动故障切换** —— 每 5 分钟探测主源健康；主源超时（10 秒）或失败时自动切到官方源，主源恢复后自动切回。
+- **手动锁定** —— `/region use main|backup` 锁定任意一个源，`/region use auto` 回到自动模式。
+- **原生生效** —— 把当前生效源写入 profile 的 `.npmrc`，DSH 原生命令（如 `dsh plugin add ...`）也走该源。
+- **状态持久化** —— 模式和切换记录存于 `~/.dsh/region.json`，重启不丢。
+- **零运行时依赖** —— 只用 Node 内置模块 + 全局 fetch。
+
+## 安装
+
+### 从源码安装（当前可用）
+
+```bash
+git clone https://github.com/nononononofish/dsh-region.git
+cd dsh-region
+npm install          # 或 npx tsc（由 src/ 构建 lib/）
+dsh plugin --profile web add link:C:\path\to\dsh-region
+```
+
+> ⚠️ `link:` 后面的路径**不能包含空格**（DSH 会按空格拆分参数）。
+
+### 从 npm 安装（发布后将支持）
+
+```bash
+dsh plugin --profile web add dsh-region
+```
+
+## 使用方法
+
+在 DSH 对话框里输入：
+
+| 命令 | 作用 |
+|---|---|
+| `/region status` | 查看当前模式、生效源、最近探测结果 |
+| `/region probe` | 手动测两个源各自的延迟 |
+| `/region use auto` | 自动主备模式（默认） |
+| `/region use main` | 锁定国内镜像（npmmirror） |
+| `/region use backup` | 锁定官方 npm 源 |
+
+默认源配置：
+
+| 角色 | 源地址 |
+|---|---|
+| 主源（国内镜像） | `https://registry.npmmirror.com` |
+| 备源（官方源） | `https://registry.npmjs.org` |
+
+## 工作原理
+
+- auto 模式下，插件用稳定小包 `is-number` 作为探测目标，请求其元数据接口（单次 10 秒超时），探测 `registry.npmmirror.com`，失败则测 `registry.npmjs.org`。
+- 生效源写入 `<profile>/.npmrc`，DSH 原生 pnpm 调用读取的就是它。
+- 健康检查每 5 分钟一轮；切换事件记录在 `~/.dsh/region.json`（保留最近 50 条）。
+
+## 开发
+
+```bash
+npm run build        # tsc：src/index.ts → lib/index.js + index.d.ts
+npm run typecheck    # 仅类型检查
+npm test             # 冒烟测试 + 故障切换测试（用临时 DSH_HOME，会真实请求两个源）
+```
+
+## 开源协议
+
+[MIT](LICENSE)
