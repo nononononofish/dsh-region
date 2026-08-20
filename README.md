@@ -1,71 +1,71 @@
 # dsh-region
 
-> Download-registry failover plugin for [DeepSeek Harness](https://github.com/deepseek-ai/dsh): **China mirror first, official registry as backup, automatic switching.**
+> 为 [DeepSeek Harness](https://github.com/deepseek-ai/dsh)（DSH）开发的下载源主备切换插件：**国内镜像为主、官方源为备、故障自动切换。**
 
-`dsh-region` manages the package download registry of your DSH profile. It keeps the China npm mirror ([npmmirror](https://npmmirror.com)) as the primary source and the official npm registry as the fallback — so plugin installs stay fast inside China, and never hang when the mirror goes down.
+`dsh-region` 负责管理 DSH 配置档（profile）的包下载源。它把国内 npm 镜像（[npmmirror](https://npmmirror.com)）设为主源、官方 npm 源设为备用源——国内安装插件保持飞快，镜像挂了也不会卡死。
 
-> **Third-party community plugin. Not affiliated with or endorsed by DeepSeek.**
+> **第三方社区插件，与 DeepSeek 官方无关。**
 
-## Features
+## 功能特性
 
-- **Auto failover** — probes the primary mirror every 5 minutes; if it times out (10 s) or fails, the plugin switches to the official registry automatically, and switches back once the mirror recovers.
-- **Manual override** — lock to either source with `/region use main|backup`, or return to automatic mode with `/region use auto`.
-- **Native integration** — writes the active registry into the profile's `.npmrc`, so native DSH commands (e.g. `dsh plugin add ...`) use it too.
-- **Persistent state** — mode and history are stored in `~/.dsh/region.json` and survive restarts.
-- **Zero runtime dependencies** — Node built-ins + global `fetch` only.
+- **自动故障切换** —— 每 5 分钟探测主源健康；主源超时（10 秒）或失败时自动切到官方源，主源恢复后自动切回。
+- **手动锁定** —— `/region use main|backup` 锁定任意一个源，`/region use auto` 回到自动模式。
+- **原生生效** —— 把当前生效源写入 profile 的 `.npmrc`，DSH 原生命令（如 `dsh plugin add ...`）也走该源。
+- **状态持久化** —— 模式和切换记录存于 `~/.dsh/region.json`，重启不丢。
+- **零运行时依赖** —— 只用 Node 内置模块 + 全局 fetch。
 
-## Install
+## 安装
 
-### From source (works today)
+### 从源码安装（当前可用）
 
 ```bash
 git clone https://github.com/nononononofish/dsh-region.git
 cd dsh-region
-npm install          # or: npx tsc (build lib/ from src/)
+npm install          # 或 npx tsc（由 src/ 构建 lib/）
 dsh plugin --profile web add link:C:\path\to\dsh-region
 ```
 
-> ⚠️ The path passed to `link:` must **not contain spaces** (DSH splits the argument on spaces).
+> ⚠️ `link:` 后面的路径**不能包含空格**（DSH 会按空格拆分参数）。
 
-### From npm (once published)
+### 从 npm 安装（发布后将支持）
 
 ```bash
 dsh plugin --profile web add dsh-region
 ```
 
-## Usage
+## 使用方法
 
-In a DSH chat:
+在 DSH 对话框里输入：
 
-| Command | Description |
+| 命令 | 作用 |
 |---|---|
-| `/region status` | Show current mode, active registry and last probe result |
-| `/region probe` | Manually test latency of both registries |
-| `/region use auto` | Auto failover mode (default) |
-| `/region use main` | Lock to the China mirror (npmmirror) |
-| `/region use backup` | Lock to the official npm registry |
+| `/region status` | 查看当前模式、生效源、最近探测结果 |
+| `/region probe` | 手动测两个源各自的延迟 |
+| `/region use auto` | 自动主备模式（默认） |
+| `/region use main` | 锁定国内镜像（npmmirror） |
+| `/region use backup` | 锁定官方 npm 源 |
 
-Default sources:
+默认源配置：
 
-| Role | Registry |
+| 角色 | 源地址 |
 |---|---|
-| Primary (main) | `https://registry.npmmirror.com` |
-| Backup | `https://registry.npmjs.org` |
+| 主源（国内镜像） | `https://registry.npmmirror.com` |
+| 备源（官方源） | `https://registry.npmjs.org` |
 
-## How it works
+## 工作原理
 
-- In `auto` mode the plugin probes `registry.npmmirror.com` (falling back to `registry.npmjs.org`) with the stable package `is-number` as the probe target, using a 10 s timeout per request.
-- The active registry is written to `<profile>/.npmrc`, which is what native DSH pnpm calls read.
-- Health checks run every 5 minutes. Switch events are recorded in `~/.dsh/region.json` (last 50 entries).
+- auto 模式下，插件用稳定小包 `is-number` 作为探测目标，请求其元数据接口（单次 10 秒超时），探测 `registry.npmmirror.com`，失败则测 `registry.npmjs.org`。
+- 生效源写入 `<profile>/.npmrc`，DSH 原生 pnpm 调用读取的就是它。
+- 健康检查每 5 分钟一轮；切换事件记录在 `~/.dsh/region.json`（保留最近 50 条）。
 
-## Development
+## 开发
 
 ```bash
-npm run build        # tsc: src/index.ts -> lib/index.js + index.d.ts
-npm run typecheck    # type-check only
-npm test             # smoke test + failover test (uses a temp DSH_HOME, touches the real registries)
+npm run build        # tsc：src/index.ts → lib/index.js + index.d.ts
+npm run typecheck    # 仅类型检查
+npm test             # 冒烟测试 + 故障切换测试（用临时 DSH_HOME，会真实请求两个源）
 ```
 
-## License
+## 开源协议
 
 [MIT](LICENSE)
