@@ -107,7 +107,7 @@ function writeState(state: RegionState): void {
   } catch {
     /* 目录已存在时忽略 */
   }
-  state.log = state.log.slice(-50)
+  state.log = state.log.slice(-200)
   writeFileSync(statePath(), JSON.stringify(state, null, 2), 'utf8')
 }
 
@@ -437,7 +437,14 @@ export function apply(rawContext: unknown, config: Partial<RegionConfig> = {}): 
         | { register: (route: unknown) => () => void }
         | undefined
       const hostEffect = hostCtx['effect'] as ((fn: () => unknown, label: string) => unknown) | undefined
-      if (!webServer) return
+      if (!webServer) {
+        // 修复：不再静默——host 未提供 webServer 时明确告警，让"装上没反应"可诊断。
+        console.warn(
+          '[dsh-region] host 未提供 webServer 服务，HTTP 路由（/dsh-region/status 等）未注册；' +
+            'Web UI 菜单将不可用。若为旧版 DSH 属预期，若为新版请检查 host 是否启用 webServer。',
+        )
+        return
+      }
       hostEffect?.(
         () => {
           const disposers = registerRegionRoutes(webServer as never, service)

@@ -4,7 +4,7 @@
 [![CI](https://github.com/nononononofish/dsh-region/actions/workflows/ci.yml/badge.svg)](https://github.com/nononononofish/dsh-region/actions/workflows/ci.yml)
 [![npm version](https://img.shields.io/npm/v/dsh-region.svg)](https://www.npmjs.com/package/dsh-region)
 
-> 为 [DeepSeek Harness](https://github.com/deepseek-ai/dsh)（DSH）开发的下载源主备切换插件：**国内镜像为主、官方源为备、故障自动切换。** 已发布到 [npm](https://www.npmjs.com/package/dsh-region)。
+> 还在为下插件经常卡住或失败而烦恼么？下载本插件即可。全自动在国内镜像和官方源间换路续下，还带面板能手动查看与切换。没啦！
 
 **为什么做这个插件？** 用 DSH 安装插件时，国外下载源速率很慢，经常卡顿、无法更新，甚至更新到一半就卡住。这个插件就是为解决这个问题而生：默认使用国内镜像为主，最快地下载和更新插件；国内镜像挂掉时自动切换为官方下载源；主源恢复后自动切回。
 
@@ -16,7 +16,7 @@
 - **手动锁定** —— `/region use main|backup` 锁定任意一个源，`/region use auto` 回到自动模式。
 - **原生生效** —— 把当前生效源写入 profile 的 `.npmrc`，DSH 原生命令（如 `dsh plugin add ...`）也走该源。
 - **状态持久化** —— 模式和切换记录存于 `~/.dsh/region.json`，重启不丢。
-- **零运行时依赖** —— 只用 Node 内置模块 + 全局 fetch。
+- **零运行时依赖** —— 运行期只用 Node 内置模块 + 全局 fetch，无需插件自带任何第三方包（构建期用 react 作 devDependency，由 DSH host 运行时按需提供，不计入发布体积）。
 
 ## 安装
 
