@@ -2,3 +2,7 @@ node_modules/
 *.tsbuildinfo
 *.log
 .DS_Store
+
+# 本地改动快照（回滚用，不入库）
+.backup-*/
+.workbuddy/

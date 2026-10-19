@@ -15,8 +15,11 @@ import { RegionSettingsCard, dispatchVisibilityChanged } from './settings-card.j
 
 export const name = 'dsh-region'
 
-/** 声明需要的 client 服务：slots（UI 注入核心）、settingsScope（设置页卡片）。 */
-export const inject = ['slots', 'settingsScope']
+/** 声明需要的 client 服务：slots（UI 注入核心）。
+ *  注意：settingsScope 不作为顶层硬依赖——当前 dsh host（0.2.1-rc.2）不提供该服务，
+ *  写在顶层会让整个 client 条目永久 pending，进而拖垮 web boot（"1 entry did not activate"）。
+ *  设置页卡片改由下方 ctx.inject(['settingsScope'], ...) 软依赖尝试，缺失时静默跳过。 */
+export const inject = ['slots']
 
 /** 防重复：同一页面生命周期内只应用一次。 */
 let applied = false

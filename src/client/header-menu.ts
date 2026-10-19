@@ -32,6 +32,7 @@ const CSS = `
 .dshr-sep{height:1px;margin:5px 6px;background:var(--color-border-default,rgba(240,246,252,.08))}
 .dshr-probe{justify-content:center;color:var(--color-text-secondary,#8b949e)}
 .dshr-probe:hover{color:var(--color-text-primary,#e6edf3)}
+.dshr-fallback-host{position:fixed;top:56px;right:16px;z-index:2147483000;display:flex;align-items:center;gap:2px;padding:2px;border-radius:8px;background:color-mix(in srgb,var(--color-bg-elevated,#161b22) 88%,transparent);border:1px solid var(--color-border-default,rgba(240,246,252,.12));box-shadow:0 2px 8px rgba(1,4,9,.25)}
 `
 
 interface HeaderMenuOptions {
@@ -39,17 +40,77 @@ interface HeaderMenuOptions {
   onMenuVisibleChange?: (visible: boolean) => void
 }
 
-/** 定位 Session log 按钮（稳定锚点：class 含 sessionLog 或文本匹配）。 */
+/**
+ * 定位宿主锚点按钮。
+ *
+ * 历史教训：旧版 dsh 在右上角有「下载日志」按钮，新版把它挪进了 composer 的
+ * `+` / `/` 命令菜单（locale 键 label.export = 下载日志，默认不渲染），
+ * 于是老锚点永远匹配不到 → 入口整块静默消失。故这里做三级宽匹配，
+ * 且调用方在全部落空时必须走 fallbackHost() 兜底，不允许直接 return。
+ */
 export function findLogButton(): HTMLButtonElement | null {
   const all = Array.from(document.querySelectorAll<HTMLButtonElement>('button'))
+  const RE = /session\s*log|下载.*日志/i
+  // 1) 旧版：class 含 sessionLog
+  const byClass = all.find((b) => /sessionLog/i.test(b.className))
+  if (byClass) return byClass
+  // 2) 文本直接挂在 button 上（新版不再包 span）
+  const byText = all.find((b) => RE.test(b.textContent ?? ''))
+  if (byText) return byText
+  // 3) aria-label / title 兜底（图标按钮无可读文字）
   return (
-    all.find((b) => /sessionLog/i.test(b.className)) ??
-    all.find((b) => {
-      const span = b.querySelector('span')
-      return !!span && /session\s*log|下载.*日志/i.test(span.textContent ?? '')
-    }) ??
-    null
+    all.find(
+      (b) => RE.test(b.getAttribute('aria-label') ?? '') || RE.test(b.getAttribute('title') ?? ''),
+    ) ?? null
   )
+}
+
+/** 找不到锚点时的兜底容器：固定定位在右上角，不依赖宿主 DOM 结构。 */
+function fallbackHost(): HTMLElement {
+  let host = document.getElementById('dshr-fallback-host')
+  if (host) return host
+  host = document.createElement('div')
+  host.id = 'dshr-fallback-host'
+  host.className = 'dshr-fallback-host'
+  document.body.appendChild(host)
+  return host
+}
+
+/**
+ * 主锚点：右上角工具栏「文件资源管理器」分段按钮组（黄文件夹 + 下拉箭头）。
+ *
+ * 实测结构（dsh 0.2.1-rc.2）：
+ *   DIV[display:contents]
+ *     └ SPAN > DIV.split
+ *                ├ BUTTON[aria-label="用 文件资源管理器 打开"]   ← 黄文件夹
+ *                └ BUTTON[aria-label="更多打开方式"]             ← 下拉箭头
+ *   DIV > SPAN（··· 更多操作）
+ *   BUTTON（展开底部面板）
+ *
+ * 把入口插到该 SPAN 之前，即可落在黄文件夹左侧，与工具栏同排、间距一致。
+ * 只依赖 aria-label 语义（跨版本较稳），不依赖 CSS Module 哈希类名。
+ */
+function findToolbarHost(): { host: HTMLElement; before: Element } | null {
+  const all = Array.from(document.querySelectorAll<HTMLButtonElement>('button[aria-label]'))
+  const folder = all.find((b) =>
+    /文件资源管理器|资源管理器|File Explorer/i.test(b.getAttribute('aria-label') ?? ''),
+  )
+  if (!folder) return null
+  const split = folder.parentElement
+  const anchorSpan = split?.parentElement
+  const host = anchorSpan?.parentElement
+  if (!host || !anchorSpan) return null
+  return { host, before: anchorSpan }
+}
+
+/** 解析挂载点：工具栏优先 → 旧「下载日志」锚点 → 固定浮层兜底。 */
+function resolveMount(): { host: HTMLElement; before: Element | null } {
+  const tb = findToolbarHost()
+  if (tb) return tb
+  const anchor = findLogButton()
+  const container = anchor?.parentElement
+  if (container && anchor) return { host: container, before: anchor }
+  return { host: fallbackHost(), before: null }
 }
 
 function styleTag(): HTMLStyleElement {
@@ -220,54 +281,56 @@ export function mountHeaderMenu(options: HeaderMenuOptions = {}): () => void {
         if (disposed) return
         latest = status
         const targetVisible = status.menuVisible !== false
-        const anchor = findLogButton()
-        const container = anchor?.parentElement
-        if (!anchor || !container) return
-        const existing = container.querySelector<HTMLButtonElement>(ENTRY_SELECTOR)
+        const mount = resolveMount()
+        const existing = document.querySelector<HTMLButtonElement>(ENTRY_SELECTOR)
         if (!targetVisible) {
           existing?.remove()
           cleanupMenu()
           options.onMenuVisibleChange?.(false)
           return
         }
-        if (existing && existing.parentElement === container) {
+        if (existing && existing.parentElement === mount.host) {
           entryEl = existing
           return
         }
+        if (existing) existing.remove()
         const btn = buildEntry()
         btn.classList.add('dshr-entry')
         // 状态灯初始色
         const dot = btn.querySelector('.dshr-dot')
         if (dot) dot.classList.add(statusDotClass(status))
-        container.insertBefore(btn, anchor)
+        if (mount.before) mount.host.insertBefore(btn, mount.before)
+        else mount.host.appendChild(btn)
+        // 已挂进工具栏/锚点后，清掉空的兜底浮层
+        if (mount.host.id !== 'dshr-fallback-host') {
+          document.getElementById('dshr-fallback-host')?.remove()
+        }
         entryEl = btn
         options.onMenuVisibleChange?.(true)
       })
       .catch(() => {
         // 状态获取失败：仍显示入口（保守策略），灰灯。
         if (disposed) return
-        const anchor = findLogButton()
-        const container = anchor?.parentElement
-        if (!anchor || !container) return
-        const existing = container.querySelector<HTMLButtonElement>(ENTRY_SELECTOR)
+        const mount = resolveMount()
+        const existing = document.querySelector<HTMLButtonElement>(ENTRY_SELECTOR)
         if (existing) {
           entryEl = existing
           return
         }
         entryEl = buildEntry()
-        container.insertBefore(entryEl, anchor)
+        if (mount.before) mount.host.insertBefore(entryEl, mount.before)
+        else mount.host.appendChild(entryEl)
       })
       .finally(() => {
         ensureLock = false
       })
   }
 
-  // 自愈：监听 DOM，入口被移除后重插。
+  // 自愈：监听 DOM，入口被移除后重插（锚点与兜底容器一视同仁）。
   observer = new MutationObserver(() => {
-    const container = findLogButton()?.parentElement
-    if (!container) return
-    const stillThere = container.querySelector(ENTRY_SELECTOR)
-    if (!stillThere) ensureEntry()
+    if (disposed) return
+    if (document.querySelector(ENTRY_SELECTOR)) return
+    ensureEntry()
   })
   observer.observe(document.body, { childList: true, subtree: true })
 
@@ -305,6 +368,7 @@ export function mountHeaderMenu(options: HeaderMenuOptions = {}): () => void {
     document.removeEventListener('keydown', onKey, true)
     window.removeEventListener('dshr:visibility-changed', onVisibilityEvent)
     entryEl?.remove()
+    document.getElementById('dshr-fallback-host')?.remove()
     cleanupMenu()
   }
 }
