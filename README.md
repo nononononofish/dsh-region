@@ -107,6 +107,62 @@ npm run typecheck    # 仅类型检查
 npm test             # 三套测试：核心逻辑 + 主源故障切换 + HTTP 路由对抗（用临时 DSH_HOME，会真实请求两个源）
 ```
 
+## 维护者备忘
+
+> DSH 是快速迭代的宿主。**每次宿主大版本更新，都可能同时打断「插件启动」和「客户端挂载」两条链路。**
+> 以下是 0.3.0 实际踩过的坑，DSH 升级后按下面的自查顺序逐条过一遍。
+
+### 四条硬规矩
+
+| # | 规矩 | 违反的后果 |
+|---|---|---|
+| 1 | client 端顶层 `export const inject` 只写宿主**必然提供**的核心服务（如 `slots`）。可选服务一律用 `ctx.inject([...], cb)` 回调式软依赖 | 宿主移除该服务 → 条目永久 `pending` → 启动校验失败 → **DSH 整个起不来** |
+| 2 | 挂载必须有兜底，**不允许「找不到锚点就 return」**；定位只用 `aria-label` / 文本等语义标识 | UI 改版后锚点消失 → 插件市场显示「运行中」，界面却什么都没有，而且**不报错** |
+| 3 | 写 `<profile>` 下任何文件都要**遍历所有 profile**（`desktop` 与 `web` 各用一个） | 硬编码某一个 → 另一半场景静默失效（例如 `.npmrc` 写到 web，桌面端仍走官方源） |
+| 4 | 写 `.npmrc` **只增改 `registry=` 一行**，绝不整文件覆写 | 把用户的 `proxy=`、`_authToken`、scope registry 静默抹掉，**不可逆** |
+
+另外：**绝不要用构建生成的 CSS Module 哈希类名当选择器**（形如 `WgQWqa_main`），前缀每次构建都可能变；
+`aria-label` 这类语义属性才跨版本稳定。
+
+### DSH 升级后自查顺序
+
+1. **DSH 能起来吗？**
+   起不来先看 `%APPDATA%\@deepseek-ai\dsh-desktop\logs\crash-*-web-boot.log`。
+   出现 `web boot: N entry did not activate` + `xxx: pending (waiting for service: yyy)`，就是违反了规矩 1。
+2. **起来了但插件没反应？** → 按「本地调试」读真实 DOM，查挂载锚点（规矩 2）。
+3. **镜像不生效？** → `cd ~/.dsh/profiles/<profile> && npm config get registry`，
+   看到的不是镜像就查规矩 3、4。
+4. **状态灯一直是灰的？** → 抓 `/dsh-region/status`。`main` / `backup` 为 `null` 说明自动探测结果
+   没写进 `lastProbe`（原实现只有手动「立即测速」才写，0.3.0 已修）。
+
+### 本地调试（读宿主真实 DOM）
+
+宿主界面元素随时会变，**不要猜**。用 Chrome DevTools Protocol 直接读渲染进程：
+
+```bash
+# 1) 先关掉已运行的 DSH —— Electron 有单实例锁，否则调试端口不生效
+# 2) 带调试端口启动
+"D:\Program Files (x86)\DeepSeek Harness\DeepSeek Harness.exe" --no-sandbox --remote-debugging-port=9222
+
+# 3) 取页面的 webSocketDebuggerUrl
+curl http://127.0.0.1:9222/json
+
+# 4) 连上该 ws，发 Runtime.evaluate 执行 JS，例如：
+#    [...document.querySelectorAll('button')].map(b => b.getAttribute('aria-label'))
+```
+
+> 0.3.0 就是用这个方法定位到「文件资源管理器」按钮的 `aria-label="用 文件资源管理器 打开"`，
+> 并确认工具栏那一行是个 `display: contents` 容器（所以插入子元素能自然参与父级 flex 排布）。
+
+### 环境坑
+
+- **从 AI 工具 / IDE 的集成终端启动 Electron 会静默失败**：父进程若注入了 `ELECTRON_RUN_AS_NODE=1`，
+  Electron 会退化成纯 Node —— 不开窗口、不写日志、进程秒退。排查前先 `set ELECTRON_RUN_AS_NODE=` 再启动。
+- **`npm publish` 需要 2FA**：在非交互式环境（CI / 自动化脚本）里会直接 `EOTP` 失败，
+  连授权链接都拿不到，必须在真实终端人工执行 —— CLI 会打印 `https://www.npmjs.com/auth/cli/<id>`，
+  浏览器授权后自动继续。
+- npm 自 2026-08 起限制绕过 2FA 的 token，**2027-01 起禁止免 2FA 直接发布**，发布流程只会越来越严。
+
 ## 开源协议
 
 [MIT](LICENSE)
