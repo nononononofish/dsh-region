@@ -117,7 +117,7 @@ npm test             # 三套测试：核心逻辑 + 主源故障切换 + HTTP �
 | # | 规矩 | 违反的后果 |
 |---|---|---|
 | 1 | client 端顶层 `export const inject` 只写宿主**必然提供**的核心服务（如 `slots`）。可选服务一律用 `ctx.inject([...], cb)` 回调式软依赖 | 宿主移除该服务 → 条目永久 `pending` → 启动校验失败 → **DSH 整个起不来** |
-| 2 | 挂载必须有兜底，**不允许「找不到锚点就 return」**；定位只用 `aria-label` / 文本等语义标识 | UI 改版后锚点消失 → 插件市场显示「运行中」，界面却什么都没有，而且**不报错** |
+| 2 | 挂载**不要往宿主 DOM 里插元素**。用固定定位 + 锚点按钮坐标；锚点按 `文件资源管理器` → `右侧边栏` → `更多操作` 多级回退，全部缺失才回固定点 | 宿主工具栏不同页面结构完全不同（新建对话页连黄文件夹都没有），且 `titleRow` 存在溢出容器的大 margin（实测 `margin-left:774px` 而容器宽仅 1592）——插进去必然错位、重叠或被甩到最左 |
 | 3 | 写 `<profile>` 下任何文件都要**遍历所有 profile**（`desktop` 与 `web` 各用一个） | 硬编码某一个 → 另一半场景静默失效（例如 `.npmrc` 写到 web，桌面端仍走官方源） |
 | 4 | 写 `.npmrc` **只增改 `registry=` 一行**，绝不整文件覆写 | 把用户的 `proxy=`、`_authToken`、scope registry 静默抹掉，**不可逆** |
 
@@ -129,7 +129,9 @@ npm test             # 三套测试：核心逻辑 + 主源故障切换 + HTTP �
 1. **DSH 能起来吗？**
    起不来先看 `%APPDATA%\@deepseek-ai\dsh-desktop\logs\crash-*-web-boot.log`。
    出现 `web boot: N entry did not activate` + `xxx: pending (waiting for service: yyy)`，就是违反了规矩 1。
-2. **起来了但插件没反应？** → 按「本地调试」读真实 DOM，查挂载锚点（规矩 2）。
+2. **起来了但图标位置不对、或根本看不见？** → 按「本地调试」读真实 DOM，查锚点（规矩 2）。
+   **必须分别在「会话页」和「新建对话页」各验一次** —— 这两页的工具栏内容完全不同，
+   会话页有黄文件夹组、新建对话页只有「打开右侧边栏」，只验一页会漏。
 3. **镜像不生效？** → `cd ~/.dsh/profiles/<profile> && npm config get registry`，
    看到的不是镜像就查规矩 3、4。
 4. **状态灯一直是灰的？** → 抓 `/dsh-region/status`。`main` / `backup` 为 `null` 说明自动探测结果
