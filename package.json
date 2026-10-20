@@ -1,6 +1,6 @@
 {
   "name": "dsh-region",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "还在为下插件经常卡住或失败而烦恼么？下载本插件即可。全自动在国内镜像和官方源间换路续下，还带面板能手动查看与切换。没啦！",
   "type": "module",
   "main": "lib/index.js",

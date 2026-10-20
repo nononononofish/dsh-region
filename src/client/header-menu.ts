@@ -326,11 +326,27 @@ export function mountHeaderMenu(options: HeaderMenuOptions = {}): () => void {
       })
   }
 
-  // 自愈：监听 DOM，入口被移除后重插（锚点与兜底容器一视同仁）。
+  // 自愈 + 迁移：不能只判断"入口是否存在"，还要判断"位置对不对"。
+  // 教训：宿主 UI 若在插件挂载之后才渲染完，首次 ensureEntry 会落进兜底浮层；
+  // 旧实现只查 ENTRY_SELECTOR 是否存在，于是永远不迁移，用户看到的就是"图标跑到浮层里"。
+  let relocateAt = 0
   observer = new MutationObserver(() => {
     if (disposed) return
-    if (document.querySelector(ENTRY_SELECTOR)) return
-    ensureEntry()
+    const existing = document.querySelector<HTMLButtonElement>(ENTRY_SELECTOR)
+    // 1) 入口消失（React 重渲染）→ 立即重建
+    if (!existing) {
+      ensureEntry()
+      return
+    }
+    // 2) 工具栏锚点已出现、但入口仍挂在兜底浮层 → 迁移回工具栏
+    //    节流 500ms：DOM 高频变动时不必每次查询按钮
+    const now = Date.now()
+    if (now - relocateAt < 500) return
+    const tb = findToolbarHost()
+    if (tb && existing.parentElement !== tb.host) {
+      relocateAt = now
+      ensureEntry()
+    }
   })
   observer.observe(document.body, { childList: true, subtree: true })
 
@@ -354,7 +370,13 @@ export function mountHeaderMenu(options: HeaderMenuOptions = {}): () => void {
   let attempts = 0
   const tryMount = (): void => {
     ensureEntry()
-    if (!document.querySelector(ENTRY_SELECTOR) && attempts < 20) {
+    // 目标是「挂进工具栏」，不是「页面上有个入口」——
+    // 否则一旦先落进兜底浮层就会提前收工。锚点迟迟不出现（旧版宿主）时
+    // 最多空转 30 秒，之后交给 MutationObserver 的自愈逻辑。
+    const existing = document.querySelector<HTMLButtonElement>(ENTRY_SELECTOR)
+    const tb = findToolbarHost()
+    const inToolbar = !!existing && !!tb && existing.parentElement === tb.host
+    if (!inToolbar && attempts < 60) {
       attempts += 1
       setTimeout(tryMount, 500)
     }
