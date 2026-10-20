@@ -1,0 +1,56 @@
+name: Publish to npm
+
+# 通过 npm Trusted Publishing (OIDC) 发布，无需任何密钥。
+# 打 tag 即触发：git tag v0.3.3 && git push origin v0.3.3
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  # OIDC 必需：让 Actions 能换取 npm 的短期发布凭据
+  id-token: write
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          # 必须用 Node 24：Trusted Publishing 要求 npm CLI >= 11.5.1，
+          # 而 Node 22 自带 npm 10.x，会直接失败。
+          node-version: '24'
+          registry-url: 'https://registry.npmjs.org'
+          # release 构建禁用缓存，避免拿到陈旧产物
+          package-manager-cache: false
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type check
+        run: npm run typecheck
+
+      # npm test 内部会先 npm run build，无需重复构建
+      - name: Build and test
+        run: npm test
+
+      - name: Verify tag matches package.json version
+        run: |
+          PKG_VERSION=$(node -p "require('./package.json').version")
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          echo "tag=$TAG_VERSION package.json=$PKG_VERSION"
+          if [ "$PKG_VERSION" != "$TAG_VERSION" ]; then
+            echo "::error::tag ($TAG_VERSION) 与 package.json ($PKG_VERSION) 版本不一致，拒绝发布"
+            exit 1
+          fi
+
+      # Trusted Publishing：不传 NODE_AUTH_TOKEN，凭据由 OIDC 自动换取，
+      # provenance 证明也会自动生成（无需 --provenance）。
+      - name: Publish
+        run: npm publish
