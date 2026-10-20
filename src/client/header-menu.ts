@@ -32,7 +32,9 @@ const CSS = `
 .dshr-sep{height:1px;margin:5px 6px;background:var(--color-border-default,rgba(240,246,252,.08))}
 .dshr-probe{justify-content:center;color:var(--color-text-secondary,#8b949e)}
 .dshr-probe:hover{color:var(--color-text-primary,#e6edf3)}
-.dshr-fallback-host{position:fixed;top:56px;right:16px;z-index:2147483000;display:flex;align-items:center;gap:2px;padding:2px;border-radius:8px;background:color-mix(in srgb,var(--color-bg-elevated,#161b22) 88%,transparent);border:1px solid var(--color-border-default,rgba(240,246,252,.12));box-shadow:0 2px 8px rgba(1,4,9,.25)}
+/* 固定定位的承载容器：只负责坐标，视觉上不留任何外框，
+   看起来就是工具栏上的一个普通图标按钮（位置由 placeNearAnchor 计算）。 */
+.dshr-fallback-host{position:fixed;z-index:2147483000;display:flex;align-items:center;line-height:0}
 `
 
 interface HeaderMenuOptions {
@@ -77,40 +79,60 @@ function fallbackHost(): HTMLElement {
 }
 
 /**
- * 主锚点：右上角工具栏「文件资源管理器」分段按钮组（黄文件夹 + 下拉箭头）。
+ * 选择锚点按钮：入口固定定位在它左侧。
  *
- * 实测结构（dsh 0.2.1-rc.2）：
- *   DIV[display:contents]
- *     └ SPAN > DIV.split
- *                ├ BUTTON[aria-label="用 文件资源管理器 打开"]   ← 黄文件夹
- *                └ BUTTON[aria-label="更多打开方式"]             ← 下拉箭头
- *   DIV > SPAN（··· 更多操作）
- *   BUTTON（展开底部面板）
+ * 为什么不再「插入宿主 DOM」：
+ *  1. 宿主 titleRow 的布局带溢出的大 margin —— 实测 headerCorner 的
+ *     `margin-left: 774px`，实际渲染在 1880，而容器宽只有 1592（溢出），
+ *     往这种 flex 行里插元素必然错位；
+ *  2. 不同页面工具栏内容不同：有会话时是「黄文件夹 + 下拉 + ··· + 底部面板」，
+ *     新建对话时只有「打开右侧边栏」，按容器找会直接找不到。
  *
- * 把入口插到该 SPAN 之前，即可落在黄文件夹左侧，与工具栏同排、间距一致。
- * 只依赖 aria-label 语义（跨版本较稳），不依赖 CSS Module 哈希类名。
+ * 所以统一改为「固定定位 + 锚定到按钮左侧」：位置精确、与宿主布局完全解耦。
+ * 锚点按优先级：文件资源管理器 → 右侧边栏 → 更多操作。
  */
-function findToolbarHost(): { host: HTMLElement; before: Element } | null {
-  const all = Array.from(document.querySelectorAll<HTMLButtonElement>('button[aria-label]'))
-  const folder = all.find((b) =>
-    /文件资源管理器|资源管理器|File Explorer/i.test(b.getAttribute('aria-label') ?? ''),
+function findAnchorButton(): HTMLButtonElement | null {
+  const btns = Array.from(document.querySelectorAll<HTMLButtonElement>('button[aria-label]'))
+  const byAria = (re: RegExp): HTMLButtonElement | null =>
+    btns.find((b) => re.test(b.getAttribute('aria-label') ?? '')) ?? null
+  return (
+    byAria(/文件资源管理器|资源管理器|File Explorer/i) ??
+    byAria(/右侧边栏|Right sidebar/i) ??
+    byAria(/更多操作|More actions/i) ??
+    null
   )
-  if (!folder) return null
-  const split = folder.parentElement
-  const anchorSpan = split?.parentElement
-  const host = anchorSpan?.parentElement
-  if (!host || !anchorSpan) return null
-  return { host, before: anchorSpan }
+}
+
+/** 锚点不可用时的保底位置：右上角固定点，保证入口始终可见。 */
+function applyDefaultSpot(host: HTMLElement): void {
+  host.style.top = '56px'
+  host.style.left = 'auto'
+  host.style.right = '16px'
+  host.style.bottom = 'auto'
+}
+
+/** 把容器定位到锚点按钮左侧：间距 8px、垂直居中对齐。 */
+function placeNearAnchor(host: HTMLElement, btn: HTMLButtonElement | null): boolean {
+  if (!btn || !btn.isConnected) {
+    applyDefaultSpot(host)
+    return false
+  }
+  const r = btn.getBoundingClientRect()
+  if (r.width === 0 || r.height === 0) {
+    applyDefaultSpot(host)
+    return false
+  }
+  host.style.top = `${Math.round(r.top + (r.height - 28) / 2)}px`
+  host.style.left = `${Math.round(r.left - 36)}px`
+  host.style.right = 'auto'
+  host.style.bottom = 'auto'
+  return true
 }
 
 /** 解析挂载点：工具栏优先 → 旧「下载日志」锚点 → 固定浮层兜底。 */
-function resolveMount(): { host: HTMLElement; before: Element | null } {
-  const tb = findToolbarHost()
-  if (tb) return tb
-  const anchor = findLogButton()
-  const container = anchor?.parentElement
-  if (container && anchor) return { host: container, before: anchor }
-  return { host: fallbackHost(), before: null }
+/** 解析挂载点：统一用兜底容器（固定定位），锚点按钮只负责决定坐标。 */
+function resolveMount(): { host: HTMLElement; anchor: HTMLButtonElement | null } {
+  return { host: fallbackHost(), anchor: findAnchorButton() }
 }
 
 function styleTag(): HTMLStyleElement {
@@ -290,6 +312,8 @@ export function mountHeaderMenu(options: HeaderMenuOptions = {}): () => void {
           return
         }
         if (existing && existing.parentElement === mount.host) {
+          // 位置正确的直接复用，但仍按锚点重定位一次（窗口尺寸/侧边栏状态可能变过）
+          placeNearAnchor(mount.host, mount.anchor)
           entryEl = existing
           return
         }
@@ -299,12 +323,8 @@ export function mountHeaderMenu(options: HeaderMenuOptions = {}): () => void {
         // 状态灯初始色
         const dot = btn.querySelector('.dshr-dot')
         if (dot) dot.classList.add(statusDotClass(status))
-        if (mount.before) mount.host.insertBefore(btn, mount.before)
-        else mount.host.appendChild(btn)
-        // 已挂进工具栏/锚点后，清掉空的兜底浮层
-        if (mount.host.id !== 'dshr-fallback-host') {
-          document.getElementById('dshr-fallback-host')?.remove()
-        }
+        mount.host.appendChild(btn)
+        placeNearAnchor(mount.host, mount.anchor)
         entryEl = btn
         options.onMenuVisibleChange?.(true)
       })
@@ -315,20 +335,21 @@ export function mountHeaderMenu(options: HeaderMenuOptions = {}): () => void {
         const existing = document.querySelector<HTMLButtonElement>(ENTRY_SELECTOR)
         if (existing) {
           entryEl = existing
+          placeNearAnchor(mount.host, mount.anchor)
           return
         }
         entryEl = buildEntry()
-        if (mount.before) mount.host.insertBefore(entryEl, mount.before)
-        else mount.host.appendChild(entryEl)
+        mount.host.appendChild(entryEl)
+        placeNearAnchor(mount.host, mount.anchor)
       })
       .finally(() => {
         ensureLock = false
       })
   }
 
-  // 自愈 + 迁移：不能只判断"入口是否存在"，还要判断"位置对不对"。
-  // 教训：宿主 UI 若在插件挂载之后才渲染完，首次 ensureEntry 会落进兜底浮层；
-  // 旧实现只查 ENTRY_SELECTOR 是否存在，于是永远不迁移，用户看到的就是"图标跑到浮层里"。
+  // 自愈 + 跟随：入口消失就重建；锚点位置变了就重定位。
+  // 由于入口是固定定位、不参与宿主布局，页面切换/侧边栏开合/窗口缩放
+  // 都只会改变锚点坐标，重定位一次即可。
   let relocateAt = 0
   observer = new MutationObserver(() => {
     if (disposed) return
@@ -338,14 +359,13 @@ export function mountHeaderMenu(options: HeaderMenuOptions = {}): () => void {
       ensureEntry()
       return
     }
-    // 2) 工具栏锚点已出现、但入口仍挂在兜底浮层 → 迁移回工具栏
-    //    节流 500ms：DOM 高频变动时不必每次查询按钮
+    // 2) 锚点换位置了 → 跟着走（节流 200ms，DOM 高频变动时不必每次都算）
     const now = Date.now()
-    if (now - relocateAt < 500) return
-    const tb = findToolbarHost()
-    if (tb && existing.parentElement !== tb.host) {
+    if (now - relocateAt < 200) return
+    const anchor = findAnchorButton()
+    if (anchor && existing.parentElement) {
       relocateAt = now
-      ensureEntry()
+      placeNearAnchor(existing.parentElement, anchor)
     }
   })
   observer.observe(document.body, { childList: true, subtree: true })
@@ -365,18 +385,23 @@ export function mountHeaderMenu(options: HeaderMenuOptions = {}): () => void {
   // 设置页胶囊切换后，重新评估菜单显隐。
   const onVisibilityEvent = (): void => ensureEntry()
   window.addEventListener('dshr:visibility-changed', onVisibilityEvent)
+  // 窗口尺寸变化会让锚点换位置，固定定位的入口要跟着走
+  const onResize = (): void => ensureEntry()
+  window.addEventListener('resize', onResize)
 
   // 首次挂载（可能 shell 还没渲染完，轮询几次）
   let attempts = 0
   const tryMount = (): void => {
     ensureEntry()
-    // 目标是「挂进工具栏」，不是「页面上有个入口」——
-    // 否则一旦先落进兜底浮层就会提前收工。锚点迟迟不出现（旧版宿主）时
-    // 最多空转 30 秒，之后交给 MutationObserver 的自愈逻辑。
+    // 目标是「已经定位到锚点左侧」，而不是「页面上有个入口」。
+    // 锚点尚未渲染出来时继续重试，最多 30 次 × 500ms。
     const existing = document.querySelector<HTMLButtonElement>(ENTRY_SELECTOR)
-    const tb = findToolbarHost()
-    const inToolbar = !!existing && !!tb && existing.parentElement === tb.host
-    if (!inToolbar && attempts < 60) {
+    const anchor = findAnchorButton()
+    let placed = false
+    if (existing?.parentElement && anchor) {
+      placed = placeNearAnchor(existing.parentElement, anchor)
+    }
+    if (!placed && attempts < 60) {
       attempts += 1
       setTimeout(tryMount, 500)
     }
@@ -389,6 +414,7 @@ export function mountHeaderMenu(options: HeaderMenuOptions = {}): () => void {
     document.removeEventListener('click', onDocClick, true)
     document.removeEventListener('keydown', onKey, true)
     window.removeEventListener('dshr:visibility-changed', onVisibilityEvent)
+    window.removeEventListener('resize', onResize)
     entryEl?.remove()
     document.getElementById('dshr-fallback-host')?.remove()
     cleanupMenu()
