@@ -5,6 +5,19 @@
 格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## [0.3.3] - 2026-10-21
+
+发布链路版本，无功能改动。**这是第一个不需要人工过 2FA 的版本。**
+
+### 工程
+
+- 接入 **npm Trusted Publishing (OIDC)**：打 tag 即自动发布，仓库内不保存任何密钥。
+  - 触发：`git tag vX.Y.Z` + 推送 tag
+  - 固定 Node 24（Trusted Publishing 要求 npm CLI ≥ 11.5.1，Node 22 自带 10.x 会失败）
+  - 发布前校验 tag 与 `package.json` 版本一致，防止发错版本
+  - 自动生成 provenance 证明（npm 页面可追溯到具体 commit）
+- 0.3.2 及之前需手动 `npm login` + `npm publish`；自本版起 CI 全自动。
+
 ## [0.3.2] - 2026-10-20
 
 修掉「新建对话页图标跑到浮层」——挂载策略从「插入宿主 DOM」改为「固定定位 + 锚定按钮」。
